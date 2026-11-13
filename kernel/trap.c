@@ -5,6 +5,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "mlfq.h"
 
 struct spinlock tickslock;
 uint ticks;
@@ -81,9 +82,12 @@ usertrap(void)
   if (killed(p))
     kexit(-1);
 
-  // give up the CPU if this is a timer interrupt.
-  if (which_dev == 2)
-    yield();
+  // timer tick: charge it to this process and let the scheduling policy
+  // decide whether it keeps the cpu. (xv6 used to yield on every tick)
+  if (which_dev == 2) {
+    if (mlfq_should_yield(p))
+      yield();
+  }
 
   prepare_return();
 
@@ -153,9 +157,13 @@ kerneltrap()
     panic("kerneltrap");
   }
 
-  // give up the CPU if this is a timer interrupt.
-  if (which_dev == 2 && myproc() != 0)
-    yield();
+  // same deal if the tick showed up while we were in the kernel. if this
+  // cpu was sitting in scheduler() there's no process to charge
+  struct proc *p = myproc();
+  if (which_dev == 2 && p != 0) {
+    if (mlfq_should_yield(p))
+      yield();
+  }
 
   // the yield() may have caused some traps to occur,
   // so restore trap registers for use by kernelvec.S's sepc instruction.
@@ -169,6 +177,12 @@ clockintr()
   if (cpuid() == 0) {
     acquire(&tickslock);
     ticks++;
+    // priority boost every BOOST_TICKS ticks. it's a power of two, so
+    // masking off the low bits is the same as ticks % 64 == 0.
+    // we're holding tickslock, and boosting takes each p->lock after it,
+    // which is the order the rest of the kernel uses
+    if ((ticks & (BOOST_TICKS - 1)) == 0)
+      mlfq_boost_all();
     wakeup(&ticks);
     release(&tickslock);
   }

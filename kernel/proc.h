@@ -101,4 +101,11 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+
+  // scheduler bookkeeping, all protected by p->lock
+  int runticks;   // ticks charged to this process
+  int nsched;     // how many times the scheduler picked it
+  int ctime;      // value of ticks when it was created
+  int prio;       // MLFQ level it's at right now (0 = top)
+  int ticks_left; // ticks left in its slice at that level
 };
